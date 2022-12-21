@@ -4,8 +4,25 @@ project(final)
 set(CMAKE_BUILD_TYPE debug)
 set(CMAKE_CXX_STANDARD 20)
 
+include_directories(.)
+
 add_executable(indoor indoor.cpp)
 target_link_libraries(indoor deps)
+
+add_executable(outdoor outdoor.cpp)
+target_sources(outdoor
+        PRIVATE
+        DynamicSceneObject.cpp
+        MyCameraManager.cpp
+        MyImGuiPanel.cpp
+        SceneRenderer.cpp
+        Shader.cpp
+        ViewFrustumSceneObject.cpp
+        terrain/MyTerrain.cpp
+        terrain/TerrainSceneObject.cpp
+        camera/MyCamera.cpp
+        camera/MyOrbitControl.cpp)
+target_link_libraries(outdoor deps)
 
 add_library(deps INTERFACE)
 
