@@ -153,7 +153,9 @@ struct Node
     aiNode *n;
     aiMatrix4x4 t;
 
-    Node(aiNode *n, aiMatrix4x4 t) : n(n), t(t) {}
+    Node(aiNode *n, aiMatrix4x4 t)
+        : n(n), t(t)
+    {}
 };
 
 struct Texture
@@ -161,6 +163,7 @@ struct Texture
     int w = 0, h = 0;
     GLuint m_texture = 0;
     vec4 color = vec4(0.0f);
+    vec4 ka, kns;
 
     Texture() = default;
 
@@ -211,20 +214,27 @@ public:
         glAttachShader(program, fs);
         printGLShaderLog(fs);
         glLinkProgram(program);
+
+        GLint ok;
+        glGetProgramiv(program, GL_LINK_STATUS, &ok);
+        if (ok != GL_TRUE)
+            throw std::runtime_error("PROGRAM NOT LINKED");
     }
 };
 
-
 double t = 0;
+
 class App
 {
     Program original = Program("vertex.glsl", "fragment.glsl");
-    GLint m, vp, ov;
+    GLint m, vloc, ploc, ov, ka, kns, floc;
     const aiScene *s = nullptr;
     std::unordered_map<int, Mesh> meshes;
     std::unordered_map<int, Texture> textures;
     std::vector<Node> nodes;
     Assimp::Importer importer;
+
+    int feature = 0;
 
     // temp
     std::set<int> mat_idx;
@@ -241,9 +251,13 @@ class App
 public:
     App()
     {
-        vp = glGetUniformLocation(oprogram, "vp");
+        floc = glGetUniformLocation(oprogram, "feature");
+        vloc = glGetUniformLocation(oprogram, "v");
+        ploc = glGetUniformLocation(oprogram, "p");
         m = glGetUniformLocation(oprogram, "m");
         ov = glGetUniformLocation(oprogram, "ov_color");
+        ka = glGetUniformLocation(oprogram, "ka");
+        kns = glGetUniformLocation(oprogram, "kns");
 
         s = importer.ReadFile("indoor/Grey_White_Room.obj", aiProcess_Triangulate);
         if (!s || s->mFlags & AI_SCENE_FLAGS_INCOMPLETE || !s->mRootNode)
@@ -267,11 +281,17 @@ public:
                 mat->Get(AI_MATKEY_NAME, str2);
                 std::cout << str2.C_Str() << std::endl;
 
-                float f[3] = {0};
-                aiGetMaterialFloatArray(mat, AI_MATKEY_COLOR_DIFFUSE, f, NULL);
-                Texture t;
-                t.color = vec4(f[0], f[1], f[2], 1.0f);
-                textures.emplace(midx, t);
+                Texture lt;
+                float f[4] = {0};
+                aiGetMaterialFloatArray(mat, AI_MATKEY_COLOR_DIFFUSE, f, nullptr);
+                lt.color = vec4(f[0], f[1], f[2], 1.0f);
+                aiGetMaterialFloatArray(mat, AI_MATKEY_COLOR_AMBIENT, f, nullptr);
+                lt.ka = vec4(f[0], f[1], f[2], 1.0f);
+                aiGetMaterialFloatArray(mat, AI_MATKEY_COLOR_SPECULAR, f, nullptr);
+                aiGetMaterialFloatArray(mat, AI_MATKEY_SHININESS, &f[3], nullptr);
+                lt.kns = vec4(f[0], f[1], f[2], f[3]);
+
+                textures.emplace(midx, lt);
             }
         }
 
@@ -323,11 +343,13 @@ public:
         mat4 v = lookAt(cpos, cpos + direction, vec3(0, 1, 0));
 
         glUseProgram(oprogram);
-        glUniformMatrix4fv(vp, 1, GL_FALSE, value_ptr(p * v));
+        glUniformMatrix4fv(vloc, 1, GL_FALSE, value_ptr(v));
+        glUniformMatrix4fv(ploc, 1, GL_FALSE, value_ptr(p));
 
         glViewport(0, 0, dw, dh);
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
+        glUniform1i(floc, feature);
         for (auto &node: nodes) {
             for (unsigned int i = 0; i < node.n->mNumMeshes; i++) {
                 glUniformMatrix4fv(m, 1, GL_FALSE, (GLfloat *) &node.t);
@@ -335,11 +357,34 @@ public:
                 const auto &texture = textures.at(s->mMeshes[node.n->mMeshes[i]]->mMaterialIndex);
                 const auto &mesh = meshes.at(node.n->mMeshes[i]);
                 glUniform4fv(ov, 1, value_ptr(texture.color));
+                glUniform4fv(ka, 1, value_ptr(texture.ka));
+                glUniform4fv(kns, 1, value_ptr(texture.kns));
                 glBindTexture(GL_TEXTURE_2D, texture.m_texture);
                 glBindVertexArray(mesh.vao);
                 glDrawElements(GL_TRIANGLES, mesh.idx_count, GL_UNSIGNED_INT, nullptr);
             }
         }
+
+        if (ImGui::Begin("CTRL")) {
+            featureUI("Blinn-Phong", 0);
+            ImGui::End();
+        }
+    }
+
+    void featureUI(const char *name, int idx)
+    {
+        bool b = (feature & (1 << idx)) != 0;
+        if (ImGui::Button(name)) {
+            if (!b)
+                feature |= (1 << idx);
+            else
+                feature &= (0 << idx);
+        }
+        ImGui::SameLine(0.0f, 1.0f);
+        if (b)
+            ImGui::TextUnformatted("ON");
+        else
+            ImGui::TextUnformatted("OFF");
     }
 };
 
